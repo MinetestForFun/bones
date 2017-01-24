@@ -4,28 +4,20 @@
 
 
 bones = {}
-
-local function is_owner(pos, name)
-	local owner = minetest.get_meta(pos):get_string("owner")
-	if owner == "" or owner == name then
-		return true
-	end
-	return false
-end
+local share_bones_time = (tonumber(minetest.setting_get("share_bones_time")) or 1800)
 
 bones.bones_formspec =
-	"size[8,9]"..
+	"size[14,9]"..
 	default.gui_bg..
 	default.gui_bg_img..
 	default.gui_slots..
-	"list[current_name;main;0,0.3;8,4;]"..
-	"list[current_player;main;0,4.85;8,1;]"..
-	"list[current_player;main;0,6.08;8,3;8]"..
-	default.get_hotbar_bg(0,4.85)
+	"list[current_name;main;0,0.3;14,4;]"..
+	"list[current_player;main;3,4.85;8,1;]"..
+	"list[current_player;main;3,6.08;8,3;8]"..
+	"listring[current_name;main]"..
+	"listring[current_player;main]" ..
+	default.get_hotbar_bg(3,4.85)
 
---local share_bones_time = tonumber(minetest.setting_get("share_bones_time") or 1200)--ORIGINAL TIME
-local share_bones_time = tonumber(minetest.setting_get("share_bones_time") or 600)--DEBUGGING TIME
-local share_bones_time_early = tonumber(minetest.setting_get("share_bones_time_early") or (share_bones_time/4))
 
 minetest.register_node("bones:bones", {
 	description = "Bones",
@@ -39,7 +31,6 @@ minetest.register_node("bones:bones", {
 	},
 	paramtype2 = "facedir",
 	groups = {cracky = 2, oddly_breakable_by_hand = 2},
---	groups = {dig_immediate=1},
 	stack_max = 999,
 	sounds = default.node_sound_dirt_defaults({
 		footstep = {name="default_gravel_footstep", gain=0.5},
@@ -48,13 +39,10 @@ minetest.register_node("bones:bones", {
 
 	can_dig = function(pos, player)
 		local inv = minetest.get_meta(pos):get_inventory()
-		return is_owner(pos, player:get_player_name()) and inv:is_empty("main")
+		return inv:is_empty("main")
 	end,
 
 	allow_metadata_inventory_move = function(pos, from_list, from_index, to_list, to_index, count, player)
-		if is_owner(pos, player:get_player_name()) then
-			return count
-		end
 		return 0
 	end,
 
@@ -63,190 +51,172 @@ minetest.register_node("bones:bones", {
 	end,
 
 	allow_metadata_inventory_take = function(pos, listname, index, stack, player)
-		if is_owner(pos, player:get_player_name()) then
-			return stack:get_count()
-		end
-		return 0
+		return stack:get_count()
 	end,
 
-	on_metadata_inventory_take = function(pos, listname, index, stack, player)
-		local meta = minetest.get_meta(pos)
-		if meta:get_inventory():is_empty("main") then
-			minetest.remove_node(pos)
-		end
-	end,
 
 	on_punch = function(pos, node, player)
-		if(not is_owner(pos, player:get_player_name())) then
+		-- only owner can punch bones to directly add to inventory
+		local owner = minetest.get_meta(pos):get_string("owner")
+		if owner ~= player:get_player_name() then
 			return
 		end
 
 		local inv = minetest.get_meta(pos):get_inventory()
 		local player_inv = player:get_inventory()
-		local has_space = true
 
-		for i=1,inv:get_size("main") do
+		for i=1, inv:get_size("main") do
 			local stk = inv:get_stack("main", i)
 			if player_inv:room_for_item("main", stk) then
 				inv:set_stack("main", i, nil)
 				player_inv:add_item("main", stk)
-
-			else
-				has_space = false
-				break
 			end
 		end
 
---ADD GIVE BONE TO INVENTORY WHILST REMOVING NODE
-		-- remove bones if player emptied them
-		if has_space then
+		if inv:is_empty("main") then
 			minetest.remove_node(pos)
-			player:get_inventory():add_item('main', 'bones:bones 1')
-			--END ADDED BONE TO INV
 		end
-
 	end,
 
 	on_timer = function(pos, elapsed)
 		local meta = minetest.get_meta(pos)
-		local time = meta:get_int("time") + elapsed--swap this
---		if time >= share_bones_time then
-		if time >= share_bones_time then
+		if meta:get_inventory():is_empty("main") then
+			minetest.remove_node(pos)
+			return
+		end
 
---BEGIN TIME AFTER BONE EXPIRE              if hitter and hitter:is_player() and hitter:get_inventory() then
-			local time = os.date("*t");--for this on new map
-			--meta:set_string("infotext", player_name.." was killed".." at ".. time.year .. "/".. time.month .. "/" .. time.day .. ", " ..time.hour.. ":".. time.min .." by: (".."...testing..."..")");---new tesint code
-			meta:set_string("infotext", "R.I.P. ".. meta:get_string("owner").." at ".. time.year .. "/".. time.month .. "/" .. time.day .. ", " ..time.hour.. ":".. time.min .."by: ("..meta:get_string("hitter_name")..")");--new old bones code
-						--meta:set_string("infotext", "R.I.P. ".. meta:get_string("owner").." at ".. time.year .. "/".. time.month .. "/" .. time.day .. ", " ..time.hour.. ":".. time.min ..")");--new old bones code
-			--meta:set_string("infotext", meta:get_string("owner").."'s old bones")--org old bones code
-			meta:set_string("owner", "")
-		else
+		local time = meta:get_int("time") + elapsed
+		if time < share_bones_time then
 			meta:set_int("time", time)
 			return true
+		else
+			minetest.remove_node(pos)
 		end
+	end,
+	on_blast = function(pos)
+		local drops = {}
+		default.get_inventory_drops(pos, "main", drops)
+		drops[#drops+1] = "bones:bones"
+		minetest.remove_node(pos)
+		return drops
 	end,
 })
 
-local function may_replace(pos, player)
-	local node_name = minetest.get_node(pos).name
-	local node_definition = minetest.registered_nodes[node_name]
-
-	-- if the node is unknown, we let the protection mod decide
-	-- this is consistent with when a player could dig or not dig it
-	-- unknown decoration would often be removed
-	-- while unknown building materials in use would usually be left
-	if not node_definition then
-		-- only replace nodes that are not protected
-		return not minetest.is_protected(pos, player:get_player_name())
+local find_best_node = function(pos)
+	local nodes = minetest.find_nodes_in_area(
+		{x=pos.x-2,y=pos.y, z=pos.z-2},
+		{x=pos.x+2,y=pos.y+2, z=pos.z+2},
+		{"air"}
+	)
+	if #nodes > 0 then
+		return nodes[1]
 	end
 
-	-- allow replacing air and liquids
-	if node_name == "air" or node_definition.liquidtype ~= "none" then
-		return true
+	nodes = minetest.find_nodes_in_area(
+		{x=pos.x-2,y=pos.y, z=pos.z-2},
+		{x=pos.x+2,y=pos.y+2, z=pos.z+2},
+		{"group:liquid"}
+	)
+	if #nodes > 0 then
+		return nodes[1]
 	end
 
-	-- don't replace filled chests and other nodes that don't allow it
-	local can_dig_func = node_definition.can_dig
-	if can_dig_func and not can_dig_func(pos, player) then
-		return false
+	nodes = minetest.find_nodes_in_area(
+		{x=pos.x-2,y=pos.y, z=pos.z-2},
+		{x=pos.x+2,y=pos.y+2, z=pos.z+2},
+		{"group:leaves", "group:plant", "group:flower"}
+	)
+	if #nodes > 0 then
+		return nodes[1]
 	end
-
-	-- default to each nodes buildable_to; if a placed block would replace it, why shouldn't bones?
-	-- flowers being squished by bones are more realistical than a squished stone, too
-	-- exception are of course any protected buildable_to
-	return node_definition.buildable_to and not minetest.is_protected(pos, player:get_player_name())
+	return nil
 end
 
-minetest.register_on_dieplayer(function(player,hitter,self)
-	if minetest.setting_getbool("creative_mode") then
-		return
-	end
 
-	local player_inv = player:get_inventory()
-	if player_inv:is_empty("main") and
-		player_inv:is_empty("craft") then
+minetest.register_on_dieplayer(function(player)
+	if minetest.setting_getbool("creative_mode") or not player then
 		return
 	end
+	local player_name = player:get_player_name()
+	if player_name == "" then return end
 
 	local pos = player:getpos()
-	pos.x = math.floor(pos.x+0.5)
-	pos.y = math.floor(pos.y+0.5)
-	pos.z = math.floor(pos.z+0.5)
-	local param2 = minetest.dir_to_facedir(player:get_look_dir())
-	local player_name = player:get_player_name()
-	local player_inv = player:get_inventory()
+	pos.y = math.floor(pos.y + 0.5)
 
-	if (not may_replace(pos, player)) then
-		if (may_replace({x=pos.x, y=pos.y+1, z=pos.z}, player)) then
-			-- drop one node above if there's space
-			-- this should solve most cases of protection related deaths in which players dig straight down
-			-- yet keeps the bones reachable
-			pos.y = pos.y+1
-		else
-			-- drop items instead of delete
-			for i=1,player_inv:get_size("main") do
-				minetest.add_item(pos, player_inv:get_stack("main", i))
-			end
-			for i=1,player_inv:get_size("craft") do
-				minetest.add_item(pos, player_inv:get_stack("craft", i))
-			end
-			-- empty lists main and craft
-			player_inv:set_list("main", {})
-			player_inv:set_list("craft", {})
-			return
-		end
+	minetest.chat_send_player(player_name, 'Died at '..math.floor(pos.x)..','..math.floor(pos.y)..','..math.floor(pos.z))
+
+	local bones_pos = nil
+	local node = minetest.get_node_or_nil(pos)
+	if node and node.name == "air" then
+		bones_pos = pos
+	else
+		bones_pos = find_best_node(pos)
 	end
+	if not bones_pos then return end -- no pos to place bones
 
-	minetest.set_node(pos, {name="bones:bones", param2=param2})
+	minetest.set_node(bones_pos, {name="bones:bones"})
 
-	local meta = minetest.get_meta(pos)
-	local inv = meta:get_inventory()
-	inv:set_size("main", 8*4)
-	inv:set_list("main", player_inv:get_list("main"))
-
-	for i=1,player_inv:get_size("craft") do
-		local stack = player_inv:get_stack("craft", i)
-		if inv:room_for_item("main", stack) then
-			inv:add_item("main", stack)
-		else
-			--drop if no space left
-			minetest.add_item(pos, stack)
-		end
-	end
-
-	player_inv:set_list("main", {})
-	player_inv:set_list("craft", {})
-
---BEGIN TIME AT TIME OF DEATH
---ref			local time = os.date("*t");
---ref			meta:set_string("infotext", self.name.."'s fresh corpse ".. meta:get_string("owner").." at ".. time.month .. "/" .. time.day .. ", " ..time.hour.. ":".. time.min ..":" .. time.sec..")");
-
-	
-
-
-
-
+	local meta = minetest.get_meta(bones_pos)
 	meta:set_string("formspec", bones.bones_formspec)
 	meta:set_string("owner", player_name)
-	meta:set_string("hitter", hitter_name)
+	meta:set_string("infotext", player_name.."'s bones")
+	local time = os.date("*t")
+	meta:set_int("time", 0)
 
-	if share_bones_time ~= 0 then
-		local time = os.date("*t");
-		meta:set_string("infotext", player_name.." was killed".." at ".. time.year .. "/".. time.month .. "/" .. time.day .. ", " ..time.hour.. ":".. time.min .." by:("..meta:get_string("hitter_name")..")");
---		meta:set_string("infotext", player_name.." was killed".." at ".. time.year .. "/".. time.month .. "/" .. time.day .. ", " ..time.hour.. ":".. time.min ..")");--THIS WORKS
---		meta:set_string("infotext", player_name.." was killed".." at ".. time.year .. "/".. time.month .. "/" .. time.day .. ", " ..time.hour.. ":".. time.min .." by: ("..hitter:get_player_name()..")");--PROTOTYPE CODE BROKEN
-		--meta:set_string("infotext", player_name.."'s fresh corpse.  :-( R.I.P. ".. meta:get_string("owner").." at ".. time.month .. "/" .. time.day .. ", " ..time.hour.. ":".. time.min ..")");
-		--meta:set_string("infotext", player_name.."'s fresh bones")--old bones code
+	local bones_inv = meta:get_inventory()
+	bones_inv:set_size("main", 14*4)
 
-		if share_bones_time_early == 0 or not minetest.is_protected(pos, player_name) then
-			meta:set_int("time", 0)
-		else
-			meta:set_int("time", (share_bones_time - share_bones_time_early))
+
+	local player_inv = player:get_inventory()
+	-- main inventory
+	for i=1, player_inv:get_size("main") do
+		local stack = player_inv:get_stack("main", i)
+		if stack then
+			local stack_name = stack:get_name()
+			if not pclasses.data.reserved_items[stack_name] or
+			not pclasses.api.util.can_have_item(player_name, stack_name) then
+				bones_inv:add_item("main", stack)
+				player_inv:set_stack("main", i, nil)
+			end
 		end
-
-		minetest.get_node_timer(pos):start(10)
-	else
-		meta:set_string("infotext", player_name.."'s bones")
 	end
 
+	-- craft inventory
+	for i=1, player_inv:get_size("craft") do
+		local stack = player_inv:get_stack("craft", i)
+		if stack then
+			bones_inv:add_item("main", stack)
+			player_inv:set_stack("craft", i, nil)
+		end
+	end
+
+	-- unified_inventory bags
+	if minetest.get_modpath("unified_inventory") then
+		for n = 1, 4 do
+			local stack = unified_inventory.extract_bag(player, n)
+			if stack then
+				bones_inv:add_item("main", stack)
+			end
+		end
+	end
+
+	--3d_armor
+	if minetest.get_modpath("3d_armor") then
+		local name, player_inv, armor_inv, pos = armor:get_valid_player(player, "[on_dieplayer]")
+		if name then
+			for i=1, player_inv:get_size("armor") do
+				local stack = armor_inv:get_stack("armor", i)
+				if stack:get_count() > 0 and (not pclasses.data.reserved_items[stack:get_name()] or
+				not pclasses.api.util.can_have_item(name, stack:get_name())) then
+					bones_inv:add_item("main", stack)
+					armor_inv:set_stack("armor", i, nil)
+					player_inv:set_stack("armor", i, nil)
+				end
+			end
+			armor:set_player_armor(player)
+		end
+	end
+	minetest.chat_send_player(player_name, 'Your bones is at '..math.floor(bones_pos.x)..','..math.floor(bones_pos.y)..','..math.floor(bones_pos.z))
+	minetest.get_node_timer(bones_pos):start(10)
 end)
+
